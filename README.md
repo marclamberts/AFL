@@ -25,6 +25,16 @@ season-level `season_<year>_player_stats.csv` and `season_<year>_plays.csv`):
 python scrape_season.py season 2026 --out-dir data/2026
 ```
 
+Raw play-by-play JSON only, nothing else, every `<CD_M...>_raw.json` flat in
+one folder (no subfolders, no CSVs):
+
+```bash
+python scrape_season.py raw 2026 --out-dir data/2026_raw
+```
+
+(or `--match-id 7150` on that same command for just one match). Progress and
+resume for this mode are tracked in `raw_index.csv` in the output directory.
+
 Re-running the same command resumes: matches that *fully* succeeded last time
 (per the previous run's `matches_index.csv`) are skipped unless you pass
 `--overwrite`. Matches that only partially worked -- stats scraped but 0 play
@@ -91,6 +101,7 @@ comes back empty, or picks up the wrong season:
 - `afl_scraper/plays.py` - Champion Data play-by-play feed (token fetch + event flattening).
 - `afl_scraper/fixture.py` - season match discovery.
 - `afl_scraper/season.py` - orchestrates discovery + per-match scraping, resume, season CSVs.
+- `afl_scraper/raw_dump.py` - raw-only variant: just `<code>_raw.json` per match, flat in one folder.
 - `afl_scraper/pitch.py` - AFL oval pitch plotting + scatter overlay for x/y event data.
 - `scrape_season.py` - CLI.
 - `AFL Scraper.ipynb` - interactive notebook version of the same workflow.

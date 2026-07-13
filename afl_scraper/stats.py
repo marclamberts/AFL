@@ -189,7 +189,7 @@ async def scrape_match_stats(match_id: Any, out_dir: str = ".", headless: bool =
     write_csv(all_rows, all_csv, PLAYER_STATS_BASE_COLS)
 
     cd_code = find_cd_match_code(captured)
-    matchplays_blob = _find_live_matchplays_blob(captured)
+    matchplays_blob = find_live_matchplays_blob(captured)
     if matchplays_blob and not cd_code:
         cd_code = matchplays_blob.get("matchId")
 
@@ -203,7 +203,7 @@ async def scrape_match_stats(match_id: Any, out_dir: str = ".", headless: bool =
     )
 
 
-def _find_live_matchplays_blob(captured: List[Any]) -> Optional[Dict[str, Any]]:
+def find_live_matchplays_blob(captured: List[Any]) -> Optional[Dict[str, Any]]:
     """Look for a matchPlays-shaped response (top-level "matchChains" key) among what
     the match-centre page itself fetched. Prefer one with actual events in it; fall
     back to an empty one (still useful for diagnosing "wrong code" vs "no data yet")."""
