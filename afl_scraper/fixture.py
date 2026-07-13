@@ -154,11 +154,16 @@ async def _load_page_json_and_links(url: str, headless: bool = True, settle_seco
     return captured, hrefs
 
 
-def candidate_fixture_urls(season: int) -> List[str]:
-    """Best-effort guesses at a URL that lists the whole season; try them in order."""
+def candidate_fixture_urls(season_id: Any) -> List[str]:
+    """Best-effort guesses at a URL that lists the whole season; try them in order.
+
+    `season_id` is whatever value the site's own "Season" query param expects. That's
+    often *not* the calendar year -- AFL/Champion Data assign an internal, arbitrary
+    compSeason id to each season (e.g. 2026 might be id 85), unrelated to the year.
+    """
     return [
-        f"https://www.afl.com.au/fixture?Season={season}",
-        f"https://www.afl.com.au/fixture/{season}",
+        f"https://www.afl.com.au/fixture?Season={season_id}",
+        f"https://www.afl.com.au/fixture/{season_id}",
         "https://www.afl.com.au/fixture",
     ]
 
@@ -167,15 +172,24 @@ async def discover_season_matches(
     season: int,
     headless: bool = True,
     extra_urls: Optional[List[str]] = None,
+    season_id: Optional[Any] = None,
 ) -> List[MatchRef]:
     """Discover every match belonging to `season` by crawling fixture page(s).
 
+    `season` (e.g. 2026) is the calendar year, used for labeling and as a fallback
+    year-filter. `season_id` is the site's own internal season identifier if it
+    differs from the calendar year (e.g. 85) -- pass it explicitly once you've found
+    it (devtools > Network on the fixture page, look at the "Season" query param).
+
     Tries each candidate URL in turn, merging whatever it finds (both JSON-derived
-    MatchRefs and bare match-id links from the DOM), then keeps only matches whose
-    parsed start-time year matches `season` -- and any match-id-only hits we couldn't
-    date, on the assumption a page for that season mostly links to that season.
+    MatchRefs and bare match-id links from the DOM). When `season_id` is given and
+    differs from `season`, every match found is kept as-is -- a compSeason id has no
+    relationship to the calendar year, so filtering by parsed year would just discard
+    real matches. Without an explicit `season_id`, falls back to the old behaviour of
+    keeping only matches whose parsed start-time year matches `season`.
     """
-    urls = (extra_urls or []) + candidate_fixture_urls(season)
+    sid = season if season_id is None else season_id
+    urls = (extra_urls or []) + candidate_fixture_urls(sid)
 
     by_id: Dict[str, MatchRef] = {}
     link_only_ids: set = set()
@@ -204,7 +218,10 @@ async def discover_season_matches(
             # Got something from this candidate URL; no need to try the rest too.
             break
 
-    matches = [ref for ref in by_id.values() if ref.year() in (None, season)]
+    if season_id is not None and season_id != season:
+        matches = list(by_id.values())
+    else:
+        matches = [ref for ref in by_id.values() if ref.year() in (None, season)]
     known_ids = {m.match_id for m in matches}
     for mid in link_only_ids - known_ids:
         matches.append(MatchRef(match_id=mid))

@@ -14,7 +14,7 @@ import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from .fixture import MatchRef, discover_season_matches, load_match_ids_file
 from .plays import fetch_match_plays_json
@@ -129,9 +129,15 @@ async def scrape_season_raw(
     delay_seconds: float = 2.0,
     match_ids_file: Optional[str] = None,
     matches: Optional[List[MatchRef]] = None,
+    season_id: Optional[Any] = None,
 ) -> List[RawDumpOutcome]:
     """Raw-only, flat-folder version of season.scrape_season: every `<code>_raw.json`
-    lands directly in `out_dir`, with no per-match subfolders and no CSVs."""
+    lands directly in `out_dir`, with no per-match subfolders and no CSVs.
+
+    `season_id` is the site's internal season identifier for the fixture page's
+    "Season" query param, if it differs from the calendar year `season` (e.g. AFL's
+    2026 season might be internal id 85) -- see fixture.discover_season_matches.
+    """
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
 
@@ -140,7 +146,7 @@ async def scrape_season_raw(
     elif match_ids_file:
         refs = load_match_ids_file(match_ids_file)
     else:
-        refs = await discover_season_matches(season, headless=headless)
+        refs = await discover_season_matches(season, headless=headless, season_id=season_id)
 
     if not refs:
         raise RuntimeError(

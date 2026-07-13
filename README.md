@@ -15,7 +15,7 @@ playwright install chromium
 Single match:
 
 ```bash
-python scrape_season.py match 7150 --out-dir data/match7150
+python scrape_season.py match 8189 --out-dir data/match8189
 ```
 
 Whole season (auto-discovers every match, writes one subfolder per match plus
@@ -29,11 +29,29 @@ Raw play-by-play JSON only, nothing else, every `<CD_M...>_raw.json` flat in
 one folder (no subfolders, no CSVs):
 
 ```bash
-python scrape_season.py raw 2026 --out-dir data/2026_raw
+python scrape_season.py raw 2026 --season-id 85 --out-dir data/2026_raw
 ```
 
-(or `--match-id 7150` on that same command for just one match). Progress and
+(or `--match-id 8189` on that same command for just one match). Progress and
 resume for this mode are tracked in `raw_index.csv` in the output directory.
+
+### `--season-id`: the fixture page's "Season" filter isn't the calendar year
+
+AFL's site assigns its own internal id to each season for the fixture page's
+"Season" query param, and that id has no relationship to the calendar year
+(2026 turned out to be site id `85`, for example). `season` (2026) is still
+used for output paths and labeling; pass the site's real id separately with
+`--season-id` so fixture discovery hits the right URL:
+
+```bash
+python scrape_season.py season 2026 --season-id 85 --out-dir data/2026
+python scrape_season.py raw 2026 --season-id 85 --out-dir data/2026_raw
+```
+
+Find the id yourself via devtools > Network on `https://www.afl.com.au/fixture`
+and looking at what value the "Season" request parameter actually holds.
+Without `--season-id`, discovery just tries the calendar year as-is (the
+original, less reliable behavior).
 
 Re-running the same command resumes: matches that *fully* succeeded last time
 (per the previous run's `matches_index.csv`) are skipped unless you pass
@@ -66,7 +84,7 @@ a separate token+API call. If a match still shows up as "code is likely
 wrong", pass the correct code manually:
 
 ```bash
-python scrape_season.py match 7150 --cd-code CD_M20260141903 --out-dir data/match7150
+python scrape_season.py match 8189 --cd-code CD_M20260141903 --out-dir data/match8189
 ```
 
 (find the real code by opening the match-centre page in a browser, devtools

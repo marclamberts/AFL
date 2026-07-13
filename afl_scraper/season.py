@@ -16,7 +16,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from .fixture import MatchRef, discover_season_matches, load_match_ids_file
 from .plays import scrape_match_plays
@@ -178,6 +178,7 @@ async def scrape_season(
     delay_seconds: float = 2.0,
     match_ids_file: Optional[str] = None,
     matches: Optional[List[MatchRef]] = None,
+    season_id: Optional[Any] = None,
 ) -> List[MatchOutcome]:
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
@@ -187,7 +188,7 @@ async def scrape_season(
     elif match_ids_file:
         refs = load_match_ids_file(match_ids_file)
     else:
-        refs = await discover_season_matches(season, headless=headless)
+        refs = await discover_season_matches(season, headless=headless, season_id=season_id)
 
     if not refs:
         raise RuntimeError(

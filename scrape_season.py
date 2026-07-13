@@ -12,6 +12,12 @@ Scrape an entire season (auto-discovers every match, resumable):
 Only the raw play-by-play JSON, nothing else, all files flat in one folder:
     python scrape_season.py raw 2026 --out-dir data/2026_raw
 
+If the AFL fixture page's own "Season" filter uses an internal id rather than
+the calendar year (check devtools > Network on the fixture page for the
+"Season" query param -- e.g. 2026 might actually be site id 85), pass it with
+--season-id so fixture discovery hits the right URL:
+    python scrape_season.py raw 2026 --season-id 85 --out-dir data/2026_raw
+
 If fixture discovery doesn't find anything (see afl_scraper/fixture.py for why
 that's a real risk -- it hasn't been validated against the live site), supply
 your own list of match ids instead:
@@ -71,6 +77,7 @@ def _cmd_season(args: argparse.Namespace) -> None:
         delay_seconds=args.delay,
         match_ids_file=args.match_ids_file,
         matches=matches,
+        season_id=args.season_id,
     ))
 
     n_stats_ok = sum(o.stats_ok for o in outcomes)
@@ -114,6 +121,7 @@ def _cmd_raw(args: argparse.Namespace) -> None:
         delay_seconds=args.delay,
         match_ids_file=args.match_ids_file,
         matches=matches,
+        season_id=args.season_id,
     ))
 
     n_ok = sum(o.ok for o in outcomes)
@@ -145,6 +153,9 @@ def main() -> None:
     p_season.add_argument("season", type=int, help="season year, e.g. 2026")
     p_season.add_argument("--out-dir", default=None, help="directory to write per-match subfolders + season CSVs to "
                            "(default: data/<season>)")
+    p_season.add_argument("--season-id", default=None, help="the site's internal season id for its fixture-page "
+                           "'Season' query param, if different from the calendar year (e.g. 2026 might be site id "
+                           "85) -- find it in devtools > Network on the fixture page")
     p_season.add_argument("--overwrite", action="store_true", help="re-scrape matches that already have output")
     p_season.add_argument("--delay", type=float, default=2.0, help="seconds to sleep between matches (be polite)")
     p_season.add_argument("--headed", action="store_true", help="show the browser window (for debugging)")
@@ -159,6 +170,9 @@ def main() -> None:
     p_raw.add_argument("season", type=int, help="season year, e.g. 2026 (ignored if --match-id is given)")
     p_raw.add_argument("--out-dir", default=None, help="directory every <code>_raw.json lands in directly "
                         "(default: data/<season>_raw)")
+    p_raw.add_argument("--season-id", default=None, help="the site's internal season id for its fixture-page "
+                        "'Season' query param, if different from the calendar year (e.g. 2026 might be site id "
+                        "85) -- find it in devtools > Network on the fixture page")
     p_raw.add_argument("--match-id", default=None, help="scrape just this one match id instead of a whole season")
     p_raw.add_argument("--overwrite", action="store_true", help="re-scrape matches that already have raw JSON")
     p_raw.add_argument("--delay", type=float, default=2.0, help="seconds to sleep between matches (be polite)")
