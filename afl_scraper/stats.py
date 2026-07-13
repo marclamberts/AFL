@@ -105,6 +105,11 @@ class MatchStatsResult:
     away_rows: List[Dict[str, Any]]
     cd_match_code: Optional[str]
     csv_paths: Dict[str, str]
+    # Populated if the match-centre page itself fetched the play-by-play feed while
+    # loading (e.g. for a timeline widget) -- this is literally the JSON the browser
+    # session received, so it's a more trustworthy source than re-deriving the match
+    # code and re-fetching matchPlays ourselves via a separate token (see plays.py).
+    matchplays_blob: Optional[Dict[str, Any]] = None
 
 
 async def _capture_match_json(url: str, headless: bool = True, settle_seconds: float = 5.0) -> List[Any]:
@@ -184,6 +189,9 @@ async def scrape_match_stats(match_id: Any, out_dir: str = ".", headless: bool =
     write_csv(all_rows, all_csv, PLAYER_STATS_BASE_COLS)
 
     cd_code = find_cd_match_code(captured)
+    matchplays_blob = _find_live_matchplays_blob(captured)
+    if matchplays_blob and not cd_code:
+        cd_code = matchplays_blob.get("matchId")
 
     return MatchStatsResult(
         match_id=match_id,
@@ -191,4 +199,18 @@ async def scrape_match_stats(match_id: Any, out_dir: str = ".", headless: bool =
         away_rows=away_rows,
         cd_match_code=cd_code,
         csv_paths={"home": home_csv, "away": away_csv, "all": all_csv},
+        matchplays_blob=matchplays_blob,
     )
+
+
+def _find_live_matchplays_blob(captured: List[Any]) -> Optional[Dict[str, Any]]:
+    """Look for a matchPlays-shaped response (top-level "matchChains" key) among what
+    the match-centre page itself fetched. Prefer one with actual events in it; fall
+    back to an empty one (still useful for diagnosing "wrong code" vs "no data yet")."""
+    empty_fallback = None
+    for blob in captured:
+        if isinstance(blob, dict) and "matchChains" in blob:
+            if blob.get("matchChains"):
+                return blob
+            empty_fallback = empty_fallback or blob
+    return empty_fallback

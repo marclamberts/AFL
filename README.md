@@ -25,14 +25,42 @@ season-level `season_<year>_player_stats.csv` and `season_<year>_plays.csv`):
 python scrape_season.py season 2026 --out-dir data/2026
 ```
 
-Re-running the same command resumes: matches that already have output on disk
-are skipped unless you pass `--overwrite`. Progress is written to
-`matches_index.csv` in the output directory after every match, so you can
-check status (and per-match errors) while a long run is still going.
+Re-running the same command resumes: matches that *fully* succeeded last time
+(per the previous run's `matches_index.csv`) are skipped unless you pass
+`--overwrite`. Matches that only partially worked -- stats scraped but 0 play
+events, or not played yet -- are retried automatically, since that's exactly
+what a re-run should pick up. Progress is written to `matches_index.csv` in
+the output directory after every match (including an `n_play_events` column),
+so you can check status while a long run is still going.
 
-If a match's Champion Data code can't be auto-detected, its play-by-play
-scrape is skipped (stats are still saved) and the reason is recorded in
-`matches_index.csv`.
+### Raw event data (matchPlays) comes back empty
+
+Player stats and play-by-play (`matchChains`) are two independent things to
+scrape, and it's common for stats to work while plays don't. There are two
+different reasons `matchChains: []` shows up, and they need different fixes:
+
+1. **The match genuinely hasn't been played yet.** No player stats either --
+   nothing to do but wait and retry later.
+2. **The match code is wrong.** Player stats *do* exist (so the match has
+   definitely been played), but the auto-detected `CD_M...` code the scraper
+   is feeding into the play-by-play endpoint doesn't actually correspond to
+   this match. `matches_index.csv` will show `stats_ok=True`, `plays_ok=False`,
+   `n_play_events=0`, and an error containing "code is likely wrong" -- that's
+   case 2, not case 1.
+
+To make case 2 less likely in the first place, the scraper first checks
+whether the match-centre page itself already fetched non-empty play-by-play
+data while loading (captured the same passive way player stats are) and uses
+that directly if present, instead of re-deriving the code and re-fetching via
+a separate token+API call. If a match still shows up as "code is likely
+wrong", pass the correct code manually:
+
+```bash
+python scrape_season.py match 7150 --cd-code CD_M20260141903 --out-dir data/match7150
+```
+
+(find the real code by opening the match-centre page in a browser, devtools
+> Network, and looking for a request to `sapi.afl.com.au/afl/matchPlays/...`).
 
 ### If season discovery finds nothing
 

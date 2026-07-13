@@ -1,8 +1,11 @@
 """Drive a full-season scrape: discover every match, then scrape stats + plays for each.
 
-Designed to be safe to re-run: matches already scraped (their CSVs already on disk)
-are skipped unless overwrite=True, so a season run that dies partway through (rate
-limiting, a bad match page, a killed process) can just be re-invoked.
+Designed to be safe to re-run: matches that fully succeeded last time (per the previous
+run's matches_index.csv) are skipped unless overwrite=True, so a season run that dies
+partway through (rate limiting, a bad match page, a killed process) can just be
+re-invoked. Matches that only partially succeeded -- e.g. stats scraped but the
+play-by-play came back empty/suspect, or the match hadn't been played yet -- are
+retried automatically, since that's exactly the case a re-run is meant to pick up.
 """
 from __future__ import annotations
 
@@ -13,7 +16,7 @@ import logging
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from .fixture import MatchRef, discover_season_matches, load_match_ids_file
 from .plays import scrape_match_plays
@@ -31,6 +34,7 @@ class MatchOutcome:
     stats_ok: bool = False
     plays_ok: bool = False
     cd_match_code: Optional[str] = None
+    n_play_events: int = 0
     error: str = ""
 
 
@@ -38,10 +42,25 @@ def _match_dir(out_dir: Path, match_id: str) -> Path:
     return out_dir / str(match_id)
 
 
-def _already_scraped(match_dir: Path, match_id: str) -> bool:
-    stats_done = (match_dir / f"match{match_id}_all_player_stats.csv").exists()
-    plays_done = any(match_dir.glob("CD_M*_plays_all.csv"))
-    return stats_done and plays_done
+def _load_previous_outcomes(out_dir: Path) -> Dict[str, MatchOutcome]:
+    path = out_dir / "matches_index.csv"
+    if not path.exists():
+        return {}
+    prev: Dict[str, MatchOutcome] = {}
+    with open(path, newline="", encoding="utf-8") as f:
+        for row in csv.DictReader(f):
+            prev[row["match_id"]] = MatchOutcome(
+                match_id=row["match_id"],
+                round=row.get("round") or None,
+                home_team=row.get("home_team") or None,
+                away_team=row.get("away_team") or None,
+                stats_ok=row.get("stats_ok") == "True",
+                plays_ok=row.get("plays_ok") == "True",
+                cd_match_code=row.get("cd_match_code") or None,
+                n_play_events=int(row.get("n_play_events") or 0),
+                error=row.get("error", ""),
+            )
+    return prev
 
 
 async def scrape_one_match(
@@ -50,15 +69,14 @@ async def scrape_one_match(
     headless: bool = True,
     overwrite: bool = False,
     token: Optional[str] = None,
+    previous: Optional[MatchOutcome] = None,
 ) -> MatchOutcome:
     outcome = MatchOutcome(match_id=ref.match_id, round=ref.round, home_team=ref.home_team, away_team=ref.away_team)
     match_dir = _match_dir(out_dir, ref.match_id)
 
-    if not overwrite and _already_scraped(match_dir, ref.match_id):
-        outcome.stats_ok = True
-        outcome.plays_ok = True
-        logger.info("match %s already scraped, skipping", ref.match_id)
-        return outcome
+    if not overwrite and previous is not None and previous.stats_ok and previous.plays_ok:
+        logger.info("match %s already fully scraped, skipping", ref.match_id)
+        return previous
 
     try:
         stats_result = await scrape_match_stats(ref.match_id, out_dir=str(match_dir), headless=headless)
@@ -69,25 +87,52 @@ async def scrape_one_match(
         logger.warning("match %s stats scrape failed: %s", ref.match_id, e)
         return outcome
 
-    if not outcome.cd_match_code:
-        outcome.error = "could not find CD_M... match code on the stats page; skipped plays scrape"
-        logger.warning("match %s: %s", ref.match_id, outcome.error)
-        return outcome
+    has_players = bool(stats_result.home_rows or stats_result.away_rows)
+    live_blob = stats_result.matchplays_blob
 
     try:
-        plays_result = await asyncio.to_thread(scrape_match_plays, outcome.cd_match_code, str(match_dir), token)
-        outcome.plays_ok = True
-        _ = plays_result
+        if live_blob and live_blob.get("matchChains"):
+            # The match-centre page itself already fetched non-empty play-by-play data;
+            # use that literal payload instead of re-deriving the code and re-fetching,
+            # since it's guaranteed to be what a real browser session actually got.
+            plays_result = scrape_match_plays(outcome.cd_match_code, str(match_dir), data=live_blob)
+        elif outcome.cd_match_code:
+            plays_result = await asyncio.to_thread(scrape_match_plays, outcome.cd_match_code, str(match_dir), token)
+        else:
+            outcome.error = "could not find a CD_M... match code or live matchChains data on the stats page; skipped plays scrape"
+            logger.warning("match %s: %s", ref.match_id, outcome.error)
+            return outcome
     except Exception as e:  # noqa: BLE001
         outcome.error = f"plays: {e}"
         logger.warning("match %s plays scrape failed: %s", ref.match_id, e)
+        return outcome
+
+    outcome.n_play_events = plays_result.n_events
+    if plays_result.n_events > 0:
+        outcome.plays_ok = True
+    elif has_players:
+        # Stats exist, so the match has definitely been played -- 0 play events despite
+        # that is suspicious, most likely `cd_match_code` doesn't actually match this
+        # match rather than "no data yet". Flag it instead of silently marking it done.
+        outcome.plays_ok = False
+        outcome.error = (
+            f"plays: matchPlays returned 0 events for code {outcome.cd_match_code!r} even though "
+            "player stats exist for this match (so it has been played) -- the auto-detected "
+            "match code is likely wrong for this match; verify it manually"
+        )
+        logger.warning("match %s: %s", ref.match_id, outcome.error)
+    else:
+        # No player stats either -- most likely this match just hasn't been played yet.
+        outcome.plays_ok = False
+        outcome.error = "plays: 0 events and no player stats -- match probably hasn't been played yet"
+        logger.info("match %s: %s", ref.match_id, outcome.error)
 
     return outcome
 
 
 def _write_matches_index(out_dir: Path, outcomes: List[MatchOutcome]) -> None:
     path = out_dir / "matches_index.csv"
-    cols = ["match_id", "round", "home_team", "away_team", "stats_ok", "plays_ok", "cd_match_code", "error"]
+    cols = ["match_id", "round", "home_team", "away_team", "stats_ok", "plays_ok", "n_play_events", "cd_match_code", "error"]
     with open(path, "w", newline="", encoding="utf-8") as f:
         w = csv.DictWriter(f, fieldnames=cols)
         w.writeheader()
@@ -95,7 +140,7 @@ def _write_matches_index(out_dir: Path, outcomes: List[MatchOutcome]) -> None:
             w.writerow({
                 "match_id": o.match_id, "round": o.round or "",
                 "home_team": o.home_team or "", "away_team": o.away_team or "",
-                "stats_ok": o.stats_ok, "plays_ok": o.plays_ok,
+                "stats_ok": o.stats_ok, "plays_ok": o.plays_ok, "n_play_events": o.n_play_events,
                 "cd_match_code": o.cd_match_code or "", "error": o.error,
             })
 
@@ -153,10 +198,15 @@ async def scrape_season(
 
     logger.info("season %s: %d matches to scrape -> %s", season, len(refs), out_path)
 
+    previous_outcomes = _load_previous_outcomes(out_path)
+
     outcomes: List[MatchOutcome] = []
     token: Optional[str] = None
     for i, ref in enumerate(refs):
-        outcome = await scrape_one_match(ref, out_path, headless=headless, overwrite=overwrite, token=token)
+        outcome = await scrape_one_match(
+            ref, out_path, headless=headless, overwrite=overwrite, token=token,
+            previous=previous_outcomes.get(ref.match_id),
+        )
         outcomes.append(outcome)
         _write_matches_index(out_path, outcomes)  # keep the index fresh so progress is visible mid-run
         if i < len(refs) - 1:

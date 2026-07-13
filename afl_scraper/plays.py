@@ -159,14 +159,34 @@ class MatchPlaysResult:
     cd_match_code: str
     n_events: int
     csv_paths: Dict[str, str]
+    source: str = "api"  # "api" (fetched via token) or "page" (captured from the match-centre page itself)
+    suspect_empty: bool = False  # 0 events from a fresh API fetch -- may be a wrong/mismatched code
 
 
-def scrape_match_plays(code: str, out_dir: str = ".", token: Optional[str] = None) -> MatchPlaysResult:
-    """Fetch and flatten the play-by-play feed for one match (identified by its CD_M... code)."""
+def scrape_match_plays(
+    code: Optional[str] = None,
+    out_dir: str = ".",
+    token: Optional[str] = None,
+    data: Optional[Any] = None,
+) -> MatchPlaysResult:
+    """Fetch (or accept already-fetched) play-by-play data for one match and flatten it to CSV.
+
+    Pass `data` when you've already captured the matchPlays JSON some other way (e.g.
+    stats.scrape_match_stats picked it up passively from the match-centre page's own
+    network traffic) -- that's the literal JSON a real browser session received, so
+    it's more trustworthy than re-deriving `code` and re-fetching it ourselves here.
+    Otherwise `code` (the CD_M... match code) is required and this fetches it directly.
+    """
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
 
-    data, _token = fetch_match_plays_json(code, token=token)
+    source = "page"
+    if data is None:
+        if not code:
+            raise ValueError("scrape_match_plays needs either `code` or pre-fetched `data`")
+        data, _token = fetch_match_plays_json(code, token=token)
+        source = "api"
+    code = code or (data.get("matchId") if isinstance(data, dict) else None) or "match"
 
     raw_path = str(out_path / f"{code}_raw.json")
     with open(raw_path, "w", encoding="utf-8") as f:
@@ -208,4 +228,13 @@ def scrape_match_plays(code: str, out_dir: str = ".", token: Optional[str] = Non
     if primary_csv_path:
         csv_paths["primary"] = primary_csv_path
 
-    return MatchPlaysResult(cd_match_code=code, n_events=len(all_flat), csv_paths=csv_paths)
+    # A fresh API fetch (source == "api") that comes back with 0 events is ambiguous: it
+    # could mean the match hasn't been played yet, or that `code` doesn't actually match
+    # this match. If it came straight off the match-centre page instead, 0 events just
+    # means the page hasn't loaded any chains -- same ambiguity, caller decides what to do.
+    suspect_empty = len(all_flat) == 0
+
+    return MatchPlaysResult(
+        cd_match_code=code, n_events=len(all_flat), csv_paths=csv_paths,
+        source=source, suspect_empty=suspect_empty,
+    )
