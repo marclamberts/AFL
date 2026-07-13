@@ -112,6 +112,24 @@ comes back empty, or picks up the wrong season:
   where `ids.txt` has one match id per line (optionally
   `id,round,home,away`).
 
+## Points Added
+
+Estimate each player's "Points Added" from a folder of already-scraped raw
+JSON files (a field-position expected-value model, in the spirit of NFL's
+EPA -- see `afl_scraper/points_added.py` for exactly how it's computed):
+
+```bash
+python points_added.py data/2026_raw --out points_added.csv --zones-out zones.csv
+```
+
+This needs a decent number of matches to be trustworthy -- with only a
+couple, the field-position "zone" values are noisy. `--zones-out` writes the
+zone value/sample-count table so you can see which zones have too few
+samples to trust yet; just re-run the same command as more matches get
+scraped, no code changes needed. Output is keyed by `playerId` (e.g.
+`CD_I1017110`) -- join it against any `match*_all_player_stats.csv` from the
+full (non-raw) scrape on that column to attach player names.
+
 ## Layout
 
 - `afl_scraper/common.py` - shared JSON-tree helpers, CSV/NDJSON writers, retry helper.
@@ -121,5 +139,7 @@ comes back empty, or picks up the wrong season:
 - `afl_scraper/season.py` - orchestrates discovery + per-match scraping, resume, season CSVs.
 - `afl_scraper/raw_dump.py` - raw-only variant: just `<code>_raw.json` per match, flat in one folder.
 - `afl_scraper/pitch.py` - AFL oval pitch plotting + scatter overlay for x/y event data.
-- `scrape_season.py` - CLI.
+- `afl_scraper/points_added.py` - field-position expected-value ("Points Added") model over scraped raw JSON.
+- `scrape_season.py` - scraping CLI.
+- `points_added.py` - Points Added analysis CLI.
 - `AFL Scraper.ipynb` - interactive notebook version of the same workflow.
